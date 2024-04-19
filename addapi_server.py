@@ -21,19 +21,21 @@ GITHUB_CLIENT_SECRET = os.getenv("GITHUB_CLIENT_SECRET")
 
 MAIN_REPO = "ShishirPatil/gorilla"
 
-deployment = False
-if not deployment:
+DEPLOYMENT = True
+if not DEPLOYMENT:
     FRONTEND_URL = "http://localhost:3000/addapi/"
     PORT = 8080
     HOST = "localhost"
     SERVER_BASEURL = f"http://{HOST}:{PORT}"
     GITHUB_CALLBACK_URL = f"{SERVER_BASEURL}/github/callback"
+    ROUTE_PREFIX = "/"
 else:
     FRONTEND_URL = "http://localhost:3000/addapi/"
-    PORT = 8080
-    HOST = "localhost"
+    PORT = 80
+    HOST = "34.133.163.39"
     SERVER_BASEURL = f"http://{HOST}:{PORT}"
     GITHUB_CALLBACK_URL = f"{SERVER_BASEURL}/github/callback"
+    ROUTE_PREFIX = "/addapi/"
 
 
 app = Flask(__name__)
@@ -44,7 +46,7 @@ CORS(app, origins=[FRONTEND_URL], supports_credentials=True)
 ### Route Definitions ###
 #########################
 
-@app.route('/convert', methods=['POST'])
+@app.route(f'{ROUTE_PREFIX}convert', methods=['POST'])
 def convert_json():
     try:
         option_2_json = request.get_json()
@@ -62,7 +64,7 @@ def convert_json():
         return Response(json.dumps({"error": str(e)}), status=500, mimetype='application/json')
 
 
-@app.route('/store-option1-content', methods=['POST'])
+@app.route(f'{ROUTE_PREFIX}store-option1-content', methods=['POST'])
 def store_option1_content():
     res = request.get_json()
     data = res.get('data')
@@ -78,7 +80,7 @@ def store_option1_content():
     return jsonify({"message": "Content stored successfully"}), 200
 
 
-@app.route('/login/github', methods=['GET'])
+@app.route(f'{ROUTE_PREFIX}login/github', methods=['GET'])
 def github_login():
     params = {
         'client_id': GITHUB_CLIENT_ID,
@@ -91,7 +93,7 @@ def github_login():
     return redirect(f"https://github.com/login/oauth/authorize?{query_params}")
 
 
-@app.route('/github/callback')
+@app.route(f'{ROUTE_PREFIX}github/callback')
 def github_callback():
     code = request.args.get('code')
     access_token = exchange_code_for_token(code)
@@ -104,7 +106,7 @@ def github_callback():
         return jsonify(access_token), 400  
 
 
-@app.route('/raise-pr', methods=['GET'])
+@app.route(f'{ROUTE_PREFIX}raise-pr', methods=['GET'])
 def submit_pr():
     access_token = session.get('access_token')
     content: ConvertResult = session.get('urlResults')
@@ -301,11 +303,13 @@ def getSuccessfulResults(urlResults: ConvertResult):
 
 
 
-@app.route("/hello", methods=["GET"])
+@app.route(f'{ROUTE_PREFIX}/hello', methods=["GET"])
 def say_hello():
     return jsonify({"msg": "Hello from Flask"})
 
     
 if __name__ == "__main__":
     # TODO: remove debug=True for production.
-    app.run(debug=True, host="localhost", port=PORT)
+    # app.run(debug=True, host="localhost", port=PORT)
+    # app.run(debug=(not DEPLOYMENT), host=HOST, port=PORT)
+    app.run()
