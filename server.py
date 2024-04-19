@@ -20,9 +20,21 @@ GITHUB_CLIENT_ID = os.getenv("GITHUB_CLIENT_ID")
 GITHUB_CLIENT_SECRET = os.getenv("GITHUB_CLIENT_SECRET")
 
 MAIN_REPO = "ShishirPatil/gorilla"
-GITHUB_CALLBACK_URL = "http://localhost:8080/github/callback"
-FRONTEND_URL = "http://localhost:3000/add-api/build"
-SERVER_BASEURL = "http://localhost:8080"
+
+deployment = False
+if not deployment:
+    FRONTEND_URL = "http://localhost:3000/addapi/"
+    PORT = 8080
+    HOST = "localhost"
+    SERVER_BASEURL = f"http://{HOST}:{PORT}"
+    GITHUB_CALLBACK_URL = f"{SERVER_BASEURL}/github/callback"
+else:
+    FRONTEND_URL = "http://localhost:3000/addapi/"
+    PORT = 8080
+    HOST = "localhost"
+    SERVER_BASEURL = f"http://{HOST}:{PORT}"
+    GITHUB_CALLBACK_URL = f"{SERVER_BASEURL}/github/callback"
+
 
 app = Flask(__name__)
 app.secret_key = os.urandom(24)
@@ -287,6 +299,13 @@ def getSuccessfulResults(urlResults: ConvertResult):
         
     return successfulResults
 
+
+
+@app.route("/hello", methods=["GET"])
+def say_hello():
+    return jsonify({"msg": "Hello from Flask"})
+
+    
 if __name__ == "__main__":
     # TODO: remove debug=True for production.
-    app.run(debug=True, host="localhost", port=8080)
+    app.run(debug=True, host="localhost", port=PORT)
