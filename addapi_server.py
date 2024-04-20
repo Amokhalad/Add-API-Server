@@ -3,7 +3,6 @@ import base64
 import os
 import time
 import requests
-import urllib.parse
 from json import dumps
 from flask import Flask, request, jsonify, redirect, session, Response
 from dotenv import load_dotenv
@@ -12,7 +11,7 @@ from flask import Flask, jsonify
 from flask_cors import CORS
 
 from html_extraction import scrape, process_results
-from customTypes import ConvertResult, ConvertedURL
+from customTypes import ConvertResult
 
 # Load .env variables
 load_dotenv()
@@ -22,20 +21,20 @@ GITHUB_CLIENT_SECRET = os.getenv("GITHUB_CLIENT_SECRET")
 MAIN_REPO = "ShishirPatil/gorilla"
 
 DEPLOYMENT = True
-if not DEPLOYMENT:
-    FRONTEND_URL = "http://localhost:3000/addapi/"
-    PORT = 8080
-    HOST = "localhost"
-    SERVER_BASEURL = f"http://{HOST}:{PORT}"
-    GITHUB_CALLBACK_URL = f"{SERVER_BASEURL}/github/callback"
-    ROUTE_PREFIX = "/"
-else:
+if DEPLOYMENT:
     FRONTEND_URL = "http://localhost:3000/addapi/"
     PORT = 80
     HOST = "34.133.163.39"
     SERVER_BASEURL = f"http://{HOST}:{PORT}"
     GITHUB_CALLBACK_URL = f"{SERVER_BASEURL}/github/callback"
     ROUTE_PREFIX = "/addapi/"
+else:
+    FRONTEND_URL = "http://localhost:3000/addapi/"
+    PORT = 8080
+    HOST = "localhost"
+    SERVER_BASEURL = f"http://{HOST}:{PORT}"
+    GITHUB_CALLBACK_URL = f"{SERVER_BASEURL}/github/callback"
+    ROUTE_PREFIX = "/"
 
 
 app = Flask(__name__)
@@ -64,55 +63,22 @@ def convert_json():
         return Response(json.dumps({"error": str(e)}), status=500, mimetype='application/json')
 
 
-@app.route(f'{ROUTE_PREFIX}store-option1-content', methods=['POST'])
-def store_option1_content():
-    res = request.get_json()
-    data = res.get('data')
-    username = res.get("user_name")
 
-    if not data or not username:
-        raise BadRequest("Missing data or username in the request body.")
-
-    # Store data in session to be used in the next routes
-    session['urlResults'] = data
-    session['user_name'] = username 
-
-    return jsonify({"message": "Content stored successfully"}), 200
-
-
-@app.route(f'{ROUTE_PREFIX}login/github', methods=['GET'])
-def github_login():
-    params = {
-        'client_id': GITHUB_CLIENT_ID,
-        'redirect_uri': GITHUB_CALLBACK_URL,
-        'scope': 'repo',
-        'state': os.urandom(16).hex(),  # Generate a secure random state
-        'allow_signup': 'true'
-    }
-    query_params = urllib.parse.urlencode(params)
-    return redirect(f"https://github.com/login/oauth/authorize?{query_params}")
-
-
-@app.route(f'{ROUTE_PREFIX}github/callback')
-def github_callback():
-    code = request.args.get('code')
-    access_token = exchange_code_for_token(code)
-
-    if access_token:
-        session['access_token'] = access_token
-        return redirect(f'{SERVER_BASEURL}/raise-pr')
-    else:
-        # Provide feedback in case of error
-        return jsonify(access_token), 400  
-
-
-@app.route(f'{ROUTE_PREFIX}raise-pr', methods=['GET'])
-def submit_pr():
-    access_token = session.get('access_token')
-    content: ConvertResult = session.get('urlResults')
-    user_name = session.get("user_name")
-    successfulResults = getSuccessfulResults(content)
+@app.route(f'{ROUTE_PREFIX}raise-pr', methods=['POST'])
+def raise_pr():
+    access_token = request.headers.get('Authorization')
+    if not access_token:
+        return jsonify({"error": "Authorization header missing or incorrect"}), 401
     
+    # Get JSON data sent from the client
+    data = request.get_json()
+    if not data or 'user_name' not in data or 'api_urls' not in data:
+        return jsonify({"error": "Missing data in request"}), 400
+    
+    user_name = data['user_name']
+    url_results = data['api_urls']
+    
+    successfulResults = getSuccessfulResults(url_results)
     file_path = f"data/apizoo/{user_name}.json"
     new_branch_name = create_unique_branch_name(user_name)
 
@@ -125,15 +91,39 @@ def submit_pr():
         file_content = dumps(list(successfulResults), indent=2) + '\n'
         create_file_in_repo(fork_repo_name, file_path, commit_message, file_content, new_branch_name, access_token)
 
-        # TODO: write code to get the base_branch
+
         base_branch = "main"
         compare_url = generate_github_compare_url(MAIN_REPO, fork_repo_name, base_branch, new_branch_name)
-        # Redirect the user to the compare URL
-        return redirect(compare_url)
+        # Return the URL for the frontend to handle redirection
+        return jsonify({"compare_url": compare_url}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 
+@app.route(f'{ROUTE_PREFIX}getAccessToken', methods=['GET'])
+def exchange_code_for_token():
+    """
+    Exchange the authorization code for an access token from GitHub.
+
+    :param code: The authorization code received from GitHub.
+    :return: The access token as a string if the exchange is successful, None otherwise.
+    """
+    code = request.args.get('code')
+    token_url = "https://github.com/login/oauth/access_token"
+    headers = {'Accept': 'application/json'}
+    payload = {
+        'client_id': GITHUB_CLIENT_ID,
+        'client_secret': GITHUB_CLIENT_SECRET,
+        'code': code,
+    }
+    # Make the POST request to exchange the code for an access token
+    response = requests.post(token_url, headers=headers, data=payload)
+    if response.ok:
+        return jsonify(response.json()), 200
+    else:
+        return jsonify({'error': 'Failed to fetch access token'}), response.status_code
+    
+    
 #################################
 ## Github API HELPER FUNCTIONS ##
 #################################
@@ -142,37 +132,6 @@ def generate_github_compare_url(main_repo, forked_repo, target_branch, new_branc
     base_repo_user, repo_name = main_repo.split('/')
     forked_repo_user = forked_repo.split('/')[0]
     return f"https://github.com/{base_repo_user}/{repo_name}/compare/{target_branch}...{forked_repo_user}:{new_branch_name}?expand=1"
-
-
-def exchange_code_for_token(code):
-    """
-    Exchange the authorization code for an access token from GitHub.
-
-    :param code: The authorization code received from GitHub.
-    :return: The access token as a string if the exchange is successful, None otherwise.
-    """
-    token_url = "https://github.com/login/oauth/access_token"
-    headers = {'Accept': 'application/json'}
-    payload = {
-        'client_id': GITHUB_CLIENT_ID,
-        'client_secret': GITHUB_CLIENT_SECRET,
-        'code': code,
-        'redirect_uri': GITHUB_CALLBACK_URL
-    }
-    try:
-        # Make the POST request to exchange the code for an access token
-        response = requests.post(token_url, headers=headers, data=payload)
-        response_json = response.json()
-
-        # Check if the response contains the access token
-        if 'access_token' in response_json:
-            return response_json['access_token']
-        else:
-            print("GitHub token exchange failed:", response_json)
-            return None
-    except requests.RequestException as e:
-        print(f"Request failed: {e}")
-        return None
 
 
 def create_unique_branch_name(user_name):
@@ -187,7 +146,7 @@ def fork_repository(repo, access_token):
     """
     url = f"https://api.github.com/repos/{repo}/forks"
     headers = {
-        "Authorization": f"Bearer {access_token}",
+        "Authorization": access_token,
         "Accept": "application/vnd.github.v3+json",
     }
     response = requests.post(url, headers=headers)
@@ -206,17 +165,13 @@ def fork_repository(repo, access_token):
         raise Exception(f"Failed to fork repository. Status code: {response.status_code}. Error: {error_message}")
 
 
-def get_latest_commit_sha(repo, branch="main"):
+def get_latest_commit_sha(access_token, repo, branch="main"):
     """
     Get the latest commit SHA of a branch in a repository using the access token stored in the session.
     """
-    access_token = session.get('access_token')
-    if not access_token:
-        raise Exception("Access token is not available in the session.")
-
     url = f"https://api.github.com/repos/{repo}/git/ref/heads/{branch}"
     headers = {
-        "Authorization": f"token {access_token}",
+        "Authorization": access_token,
         "Accept": "application/vnd.github.v3+json",
     }
     response = requests.get(url, headers=headers)
@@ -230,10 +185,10 @@ def create_branch(repo, branch_name, access_token):
     """
     Create a new branch in a repository using the access token stored in the session.
     """
-    latest_sha = get_latest_commit_sha(repo, "main")
+    latest_sha = get_latest_commit_sha(access_token, repo, "main")
     url = f"https://api.github.com/repos/{repo}/git/refs"
     headers = {
-        "Authorization": f"Bearer {access_token}",
+        "Authorization": access_token,
         "Accept": "application/vnd.github.v3+json",
     }
     data = {
@@ -250,7 +205,7 @@ def create_branch(repo, branch_name, access_token):
 def create_file_in_repo(repo, file_path, commit_message, content, branch, access_token):
     url = f"https://api.github.com/repos/{repo}/contents/{file_path}"
     headers = {
-        "Authorization": f"Bearer {access_token}",
+        "Authorization": access_token,
         "Accept": "application/vnd.github.v3+json",
     }
     data = {
@@ -303,7 +258,7 @@ def getSuccessfulResults(urlResults: ConvertResult):
 
 
 
-@app.route(f'{ROUTE_PREFIX}/hello', methods=["GET"])
+@app.route(f'{ROUTE_PREFIX}hello', methods=["GET"])
 def say_hello():
     return jsonify({"msg": "Hello from Flask"})
 
@@ -311,5 +266,4 @@ def say_hello():
 if __name__ == "__main__":
     # TODO: remove debug=True for production.
     # app.run(debug=True, host="localhost", port=PORT)
-    # app.run(debug=(not DEPLOYMENT), host=HOST, port=PORT)
-    app.run()
+    app.run(debug = not DEPLOYMENT, host=HOST, port=PORT)
