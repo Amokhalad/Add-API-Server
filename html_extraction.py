@@ -75,6 +75,16 @@ class HTTPError(Exception):
         super().__init__(f"HTTP Error with status code: {status_code}")
 
 def load_html(url):
+    """
+    Fetches and returns HTML content from a specified URL.
+
+    Returns:
+        str: HTML content of the page.
+
+    Raises:
+        HTTPError: If an HTTP error occurs.
+        ErrorFetchingContent: For non-HTTP exceptions related to fetching content.
+    """
     try:
         response = requests.get(url)
         response.raise_for_status()  # Raises an HTTPError if the status is 4xx, 5xx
@@ -89,6 +99,15 @@ def load_html(url):
 
 
 def clean_soup(soup):
+    """
+    Cleans a BeautifulSoup object by removing specified tags, classes, and ids.
+
+    Args:
+        soup (BeautifulSoup): The BeautifulSoup object to clean.
+
+    Returns:
+        BeautifulSoup: A cleaned version of the input BeautifulSoup object.
+    """
     exclude_classes = [
         "navbar", "nav", "navigation", "menu", "header", "footer",
         "sidebar", "advert", "advertisement", "banner", "breadcrumbs",
@@ -131,6 +150,12 @@ def clean_soup(soup):
 
 
 def find_main_content(soup):
+    """
+    Attempts to find the main content of a webpage from a BeautifulSoup object.
+
+    Returns:
+        BeautifulSoup: The main content element of the page.
+    """
     common_class_names = ['.main', '.main-content', '.api-documentation', '.content', '.primary-content']
     for class_name in common_class_names:
         main_content = soup.select_one(class_name)
@@ -142,6 +167,12 @@ def find_main_content(soup):
 
 
 def extract_relevant_tags(soup):
+    """
+    Extracts and returns relevant tags from a BeautifulSoup object.
+
+    Returns:
+        BeautifulSoup: A new BeautifulSoup object containing only the relevant tags.
+    """
     tags_to_include = ['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'li', 'code', 'section', 'pre']
     # Create a new soup object to hold the filtered content
     filtered_soup = BeautifulSoup('', 'html.parser')
@@ -151,6 +182,12 @@ def extract_relevant_tags(soup):
 
 
 def soup_to_markdown(soup) -> str:
+    """
+    Converts HTML content in a BeautifulSoup object to Markdown format.
+
+    Returns:
+        str: The Markdown formatted string of the HTML content.
+    """
     h = html2text.HTML2Text()
     h.ignore_links = True
     h.ignore_emphasis = False
@@ -179,6 +216,12 @@ def soup_to_markdown(soup) -> str:
 
 
 def html_transformer(html_content: str) -> str:
+    """
+    Transforms HTML content into a cleaner Markdown format.
+
+    Returns:
+        str: Markdown representation of the cleaned and only relevant HTML content.
+    """
     soup = BeautifulSoup(html_content, "html.parser")
     cleaned_soup = clean_soup(soup)
     main_soup = find_main_content(cleaned_soup)
@@ -188,11 +231,31 @@ def html_transformer(html_content: str) -> str:
 
 
 def extract(content: str, llm):
+    """
+    Uses a language model to extract structured data from Markdown formatted text.
+
+    Args:
+        content (str): Markdown text from which to extract information.
+        llm (ChatOpenAI): A pre-configured language model instance.
+
+    Returns:
+        Any: The extracted information, structured according to a predefined schema.
+    """
     p = PromptTemplate(input_variables=["api_name"], template=prompt_api())
     return create_extraction_chain_pydantic(pydantic_schema=Option1Format, llm=llm, prompt=p).run(content)
 
 
 def process_results(results: Dict[str, Dict[str, Union[Option1Format, List[Option1Format]]]], option_2_json) -> List[Any]:
+    """
+    Processes extracted results into a structured JSON format.
+
+    Args:
+        results (Dict): Dictionary of extraction results keyed by URLs.
+        option_2_json (Dict): Additional options and metadata for processing.
+
+    Returns:
+        List[Any]: List of processed results in a structured JSON format.
+    """
     def process_item(item):
         # Recursively convert items into JSON
         if isinstance(item, Option1Format):
@@ -221,12 +284,22 @@ def process_results(results: Dict[str, Dict[str, Union[Option1Format, List[Optio
                 sorted_json_format = sort_dict_by_key_order(json_format) if isinstance(json_format, dict) else print(f"ERROR SORTING item: {json_format}")
             
             content["data"] = sorted_json_format
-        
 
     return results
 
 
 def scrape(urls):
+    """
+    Scrapes web content from a list of URLs and extracts structured data of the relevant information relating to API usage.
+
+    Args:
+        urls (List[str]): A list of URLs to scrape.
+
+    Returns:
+        Dict[str, Dict[str, Union[str, List]]]: A dictionary keyed by URLs with "status" and "data"
+        indicating the outcome of the scraping process. The "status" can be either "success" or "error",
+        with "data" containing the extracted information or an error message.
+    """
     results = {}
     for url in urls:
         try:

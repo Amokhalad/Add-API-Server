@@ -47,11 +47,33 @@ CORS(app, origins=[FRONTEND_URL], supports_credentials=True)
 
 @app.route(f'{ROUTE_PREFIX}convert', methods=['POST'])
 def convert_json():
+    """
+    Process API URLs and user information to generate structured JSON results.
+
+    This endpoint accepts a POST request containing JSON data with API URLs and a user's name.
+    It processes each URL to scrape and extract relevant data, then converts the extracted data into a structured JSON format.
+
+    The JSON payload should include:
+    - 'api_urls': a list of URLs to be processed.
+    - 'user_name': the username associated with the operation.
+
+    The function performs the following steps:
+    - Extracts data from the specified URLs using a web scraping function.
+    - Processes the scraped data to generate structured JSON using custom logic.
+    - Returns the structured JSON as a response with MIME type 'application/json'.
+
+    Returns:
+    - A JSON response containing the processed data on successful execution.
+    - An error message and appropriate status code if any errors occur during processing.
+
+    Exceptions:
+    - Returns a 400 status code if any required data is missing in the request.
+    - Returns a 500 status code if there is an exception during the execution, such as failure in data fetching or processing.
+    """
     try:
         option_2_json = request.get_json()
         api_urls = option_2_json.get('api_urls')
         username = option_2_json.get("user_name")
-        session["user_name"] = username
         scrape_results: dict = scrape(api_urls) 
 
         conversion_results = process_results(scrape_results, option_2_json)
@@ -63,9 +85,37 @@ def convert_json():
         return Response(json.dumps({"error": str(e)}), status=500, mimetype='application/json')
 
 
-
 @app.route(f'{ROUTE_PREFIX}raise-pr', methods=['POST'])
 def raise_pr():
+    """
+    Create a pull request on GitHub for a specified user.
+
+    This endpoint is called with a POST request that includes an 'Authorization' header 
+    containing the access token for GitHub and a JSON payload with necessary data. It performs 
+    the following operations: forks the repository, creates a new branch, adds a new file 
+    containing the results of successful API calls, and prepares the data for a pull request.
+    
+    The JSON payload must include:
+    - 'user_name': The GitHub username of the user for whom the pull request will be raised.
+    - 'api_urls': A list of URLs that were called successfully by the client.
+    
+    The function handles the following:
+    - Forking the main repository under the user's GitHub account.
+    - Creating a unique branch based on the user's name.
+    - Adding a new JSON file with the successful API call results to the new branch.
+    - Returning a URL for the GitHub compare page to allow the user to create a pull request 
+      via the GitHub UI.
+
+    Returns:
+    - A JSON response with the 'compare_url' key pointing to the GitHub compare page, with a 
+      200 status code, if the operations are successful.
+    - A JSON response with an 'error' message and a 400 status code if the required data is 
+      missing from the request.
+    - A JSON response with an 'error' message and a 401 status code if the authorization token 
+      is missing or incorrect.
+    - A JSON response with an 'error' message and a 500 status code if any exceptions occur 
+      during the execution of the function.
+    """
     access_token = request.headers.get('Authorization')
     if not access_token:
         return jsonify({"error": "Authorization header missing or incorrect"}), 401
@@ -100,15 +150,29 @@ def raise_pr():
         return jsonify({"error": str(e)}), 500
 
 
-@app.route(f'{ROUTE_PREFIX}getAccessToken', methods=['GET'])
+@app.route(f'{ROUTE_PREFIX}get-access-token', methods=['GET'])
 def exchange_code_for_token():
     """
-    Exchange the authorization code for an access token from GitHub.
+    Exchange an authorization code for an access token from GitHub.
 
-    :param code: The authorization code received from GitHub.
-    :return: The access token as a string if the exchange is successful, None otherwise.
+    This endpoint handles the redirection from GitHub OAuth authorization. It takes
+    the 'code' parameter from the query string, which is the authorization code
+    provided by GitHub after the user has authorized the application. It then
+    exchanges this code for an access token using GitHub's access token endpoint.
+
+    Parameters:
+    - code (str): The authorization code received from GitHub as a URL query parameter.
+
+    Returns:
+    - A redirect to the FRONTEND_URL with the access token included in the query string
+      if the exchange is successful.
+    - A JSON response with an error message and a 400 status code if the 'code' parameter
+      is missing or if the token exchange fails.
     """
     code = request.args.get('code')
+    if not code:
+        return jsonify({'error': 'Authorization code is required.'}), 400
+
     token_url = "https://github.com/login/oauth/access_token"
     headers = {'Accept': 'application/json'}
     payload = {
@@ -119,11 +183,54 @@ def exchange_code_for_token():
     # Make the POST request to exchange the code for an access token
     response = requests.post(token_url, headers=headers, data=payload)
     if response.ok:
-        return jsonify(response.json()), 200
+        token_data = response.json()
+        return redirect(f"{FRONTEND_URL}?access_token={token_data['access_token']}")
     else:
         return jsonify({'error': 'Failed to fetch access token'}), response.status_code
     
     
+@app.route('/check-access-token', methods=['POST'])
+def check_access_token():
+    """
+    Verify the validity of an access token with GitHub.
+
+    This endpoint expects a JSON payload containing an 'access_token' key. It makes a
+    POST request to GitHub's token checking endpoint to verify if the provided access
+    token is valid. 
+
+    It is used by the frontend to check if the stored access token is still valid before
+    attempting to access GitHub resources.
+
+    JSON Payload:
+    - access_token (str): The OAuth access token whose validity needs to be checked.
+
+    Returns:
+    - A JSON response with a 'valid' key set to True if the access token is valid.
+    - A JSON response with a 'valid' key set to False and the appropriate status code
+      if the token is invalid, or if any other errors occur during the validation process.
+    """
+    data = request.get_json()
+    access_token = data.get('access_token')
+    if not access_token:
+        return jsonify({'error': 'Access token is missing.'}), 400
+    
+    github_token_check_url = f"https://api.github.com/applications/{GITHUB_CLIENT_ID}/token"
+    
+    try:
+        response = requests.post(
+            github_token_check_url,
+            auth=(GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET),
+            headers={ 'Accept': 'application/vnd.github+json' },
+            json={ 'access_token': access_token }
+        )
+        
+        if response.status_code == 200:
+            return jsonify({'valid': True})
+        else:
+            return jsonify({'valid': False, 'status': response.status_code})
+    except requests.RequestException as e:
+        return jsonify({'error': f'Failed to validate token with GitHub: {str(e)}'}), 500
+
 #################################
 ## Github API HELPER FUNCTIONS ##
 #################################
@@ -167,7 +274,7 @@ def fork_repository(repo, access_token):
 
 def get_latest_commit_sha(access_token, repo, branch="main"):
     """
-    Get the latest commit SHA of a branch in a repository using the access token stored in the session.
+    Get the latest commit SHA of a branch in a repository using the access token passed in.
     """
     url = f"https://api.github.com/repos/{repo}/git/ref/heads/{branch}"
     headers = {
@@ -183,7 +290,7 @@ def get_latest_commit_sha(access_token, repo, branch="main"):
 
 def create_branch(repo, branch_name, access_token):
     """
-    Create a new branch in a repository using the access token stored in the session.
+    Create a new branch in a repository using the access token passed in as an arg.
     """
     latest_sha = get_latest_commit_sha(access_token, repo, "main")
     url = f"https://api.github.com/repos/{repo}/git/refs"
@@ -203,6 +310,11 @@ def create_branch(repo, branch_name, access_token):
 
 
 def create_file_in_repo(repo, file_path, commit_message, content, branch, access_token):
+    """
+    Create or update a file in a specified GitHub repository.
+
+    This function sends a PUT request to the GitHub API to create or update a file at a specified path within a repository on a specific branch. The file content is base64 encoded before being sent.
+    """
     url = f"https://api.github.com/repos/{repo}/contents/{file_path}"
     headers = {
         "Authorization": access_token,
@@ -210,7 +322,7 @@ def create_file_in_repo(repo, file_path, commit_message, content, branch, access
     }
     data = {
         "message": commit_message,
-        "content": base64.b64encode(content.encode('utf-8')).decode('utf-8'),  # Content must be base64 encoded
+        "content": base64.b64encode(content.encode('utf-8')).decode('utf-8'), 
         "branch": branch,
     }
 
