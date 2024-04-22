@@ -189,7 +189,7 @@ def exchange_code_for_token():
         return jsonify({'error': 'Failed to fetch access token'}), response.status_code
     
     
-@app.route('/check-access-token', methods=['POST'])
+@app.route(f'{ROUTE_PREFIX}check-access-token', methods=['POST'])
 def check_access_token():
     """
     Verify the validity of an access token with GitHub.
