@@ -20,16 +20,16 @@ GITHUB_CLIENT_SECRET = os.getenv("GITHUB_CLIENT_SECRET")
 
 MAIN_REPO = "ShishirPatil/gorilla"
 
-DEPLOYMENT = True
+DEPLOYMENT = False
 if DEPLOYMENT:
-    FRONTEND_URL = "http://localhost:3000/addapi/"
+    FRONTEND_URL = "http://localhost:3000"
     PORT = 80
     HOST = "34.133.163.39"
     SERVER_BASEURL = f"http://{HOST}:{PORT}"
     GITHUB_CALLBACK_URL = f"{SERVER_BASEURL}/github/callback"
     ROUTE_PREFIX = "/addapi/"
 else:
-    FRONTEND_URL = "http://localhost:3000/addapi/"
+    FRONTEND_URL = "http://localhost:3000"
     PORT = 8080
     HOST = "localhost"
     SERVER_BASEURL = f"http://{HOST}:{PORT}"
@@ -39,7 +39,8 @@ else:
 
 app = Flask(__name__)
 app.secret_key = os.urandom(24)
-CORS(app, origins=[FRONTEND_URL], supports_credentials=True)
+# CORS(app)
+CORS(app, origins=[FRONTEND_URL])
 
 #########################
 ### Route Definitions ###
@@ -184,7 +185,7 @@ def exchange_code_for_token():
     response = requests.post(token_url, headers=headers, data=payload)
     if response.ok:
         token_data = response.json()
-        return redirect(f"{FRONTEND_URL}?access_token={token_data['access_token']}")
+        return redirect(f"{FRONTEND_URL}/?access_token={token_data['access_token']}")
     else:
         return jsonify({'error': 'Failed to fetch access token'}), response.status_code
     
